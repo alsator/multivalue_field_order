@@ -1,0 +1,246 @@
+<?php
+/**
+ * @file
+ * A description of what your module does.
+ */
+
+/**
+ * Implements hook_form_alter().
+ */
+function multivalue_field_order_form_alter(&$form, &$form_state, $form_id) {
+  switch($form_id) {
+    case 'field_ui_field_edit_form':
+      $options = array('manual_manual' => t('Manual'));
+      switch($form['#field']['type']) {
+        case 'number_integer':
+        case 'number_decimal':
+        case 'number_float':
+        case 'text':
+          $options['self_asc_first'] = t('Ascending');
+          $options['self_desc_first'] = t('Descending');
+
+          $form['field']['order'] = array(
+            '#type' => 'select',
+            '#title' => t('Order'),
+            '#options' => $options,
+            '#default_value' => isset($form['#field']['order']) ? $form['#field']['order'] : '0',
+            '#states' => array(
+              'invisible' => array(
+                ':input[name="field[cardinality]"]' => array('value' => 1),
+              ),
+            ),
+          );
+          break;
+        case 'datetime':
+          $options['self_asc_startdate'] = t('Ascending by start date');
+          $options['self_desc_startdate'] = t('Descending by start date');
+          $options['self_asc_enddate'] = t('Ascending by end date');
+          $options['self_desc_enddate'] = t('Descending by end date');
+
+          $form['field']['order'] = array(
+            '#type' => 'select',
+            '#title' => t('Order'),
+            '#options' => $options,
+            '#default_value' => isset($form['#field']['order']) ? $form['#field']['order'] : '0',
+            '#states' => array(
+              'invisible' => array(
+                ':input[name="field[cardinality]"]' => array('value' => 1),
+              ),
+            ),
+
+          );
+          $form['#attached']['js'] = array(
+            drupal_get_path('module', 'multivalue_field_order') . '/enddate.js',
+          );
+          break;
+        case 'field_collection':
+          $field_collection_items = field_info_instances('field_collection_item', $form['#field']['field_name']);
+
+          foreach($field_collection_items as $field_collection_item) {
+            $options[$field_collection_item['field_name'] . '_asc_first'] = t('Ascending by ' . strtolower($field_collection_item['label'] . '\'s first element'));
+            $options[$field_collection_item['field_name'] . '_desc_first'] = t('Descending by ' . strtolower($field_collection_item['label'] . '\'s first element'));
+            $options[$field_collection_item['field_name'] . '_asc_last'] = t('Ascending by ' . strtolower($field_collection_item['label'] . '\'s last element'));
+            $options[$field_collection_item['field_name'] . '_desc_last'] = t('Descending by ' . strtolower($field_collection_item['label'] . '\'s last element'));
+          }
+
+          $form['field']['order'] = array(
+            '#type' => 'select',
+            '#title' => t('Order'),
+            '#options' => $options,
+            '#default_value' => isset($form['#field']['order']) ? $form['#field']['order'] : '0',
+            '#states' => array(
+              'invisible' => array(
+                ':input[name="field[cardinality]"]' => array('value' => 1),
+              ),
+            ),
+          );
+          break;
+        default:
+          $options['self_asc_first'] = t('Ascending');
+          $options['self_desc_first'] = t('Descending');
+
+          drupal_alter('custom_multivalue_field_options', $options);
+
+          $form['field']['order'] = array(
+            '#type' => 'select',
+            '#title' => t('Order'),
+            '#options' => $options,
+            '#default_value' => isset($form['#field']['order']) ? $form['#field']['order'] : '0',
+            '#states' => array(
+              'invisible' => array(
+                ':input[name="field[cardinality]"]' => array('value' => 1),
+              ),
+            ),
+          );
+          break;
+      }
+      break;
+  }
+}
+
+/**
+ * Implements hook_field_storage_pre_insert().
+ */
+function multivalue_field_order_field_storage_pre_insert($entity_type, $entity, &$skip_fields) {
+  _field_sort_or_cmp_coll($entity_type, $entity,$skip_fields);
+}
+
+/**
+ * Implements hook_field_storage_pre_update().
+ */
+function multivalue_field_order_field_storage_pre_update($entity_type, $entity, &$skip_fields) {
+  _field_sort_or_cmp_coll($entity_type, $entity,$skip_fields);
+}
+
+function _field_sort_or_cmp_coll($entity_type, $entity, &$skip_fields) {
+
+  switch($entity_type) {
+
+    case 'field_collection_item':
+      $fields = field_info_instances($entity_type, $entity->field_name);
+      $language = LANGUAGE_NONE;
+      break;
+    default:
+      $fields = field_info_instances($entity_type, $entity->type);
+      $language = $entity->language;
+      break;
+  }
+
+  foreach($fields as $field_name => $field) {
+
+    $field_settings = field_info_field($field_name);
+
+    $parsed_field_order = _parse_stored_field_order($field_settings['order']);
+    if($parsed_field_order['field_name'] == 'self') {
+      _field_sort($entity->{$field_name}[$language], $field_settings['type'], $parsed_field_order);
+    }
+    else {
+      if(count($entity->{$field_name}[$language]) > 1) {
+        _cmp_field_collection($entity->{$field_name}[$language], $parsed_field_order);
+      }
+    }
+  }
+}
+
+function _cmp_field_collection(&$array, $external_parsed_field_order) {
+
+  $elements_to_compare = [];
+  foreach($array as $item) {
+    $field_coll_item_obj = field_collection_item_load($item['value']);
+    switch($external_parsed_field_order['by']) {
+      case 'first':
+        $elements_to_compare[$item['value']] = $field_coll_item_obj->{$external_parsed_field_order['field_name']}[LANGUAGE_NONE][0];
+        break;
+      case 'last':
+        $elements_to_compare[$item['value']] = $field_coll_item_obj->{$external_parsed_field_order['field_name']}[LANGUAGE_NONE][count($field_coll_item_obj->{$external_parsed_field_order['field_name']}[LANGUAGE_NONE]) - 1];
+        break;
+    }
+    $elements_to_compare[$item['value']]['item_id'] = $item['value'];
+  }
+
+  $field_settings = field_info_field($external_parsed_field_order['field_name']);
+
+  $parsed_field_order = _parse_stored_field_order($field_settings['order']);
+
+  _field_sort($elements_to_compare, $field_settings['type'], $parsed_field_order);
+
+  $sorted = [];
+  foreach($array as $item) {
+    $key = array_search($item['value'], array_column($elements_to_compare, 'item_id'));
+    $sorted[] = $array[$key];
+  }
+  $array = $sorted;
+
+}
+
+function _field_sort(&$array, $field_type, $parsed_field_order) {
+  switch($field_type) {
+    case 'number_integer':
+    case 'number_decimal':
+    case 'number_float':
+      usort($array, '_cmp_number_' . $parsed_field_order['order'] . '_' . $parsed_field_order['by']);
+      break;
+    case 'text':
+      usort($array, '_cmp_string_' . $parsed_field_order['order'] . '_' . $parsed_field_order['by']);
+      break;
+    case 'datetime':
+      usort($array, '_cmp_datetime_' . $parsed_field_order['order'] . '_' . $parsed_field_order['by']);
+      break;
+    default:
+      drupal_alter('custom_multivalue_field_sort', $array, $field_type, $parsed_field_order);
+      break;
+  }
+}
+
+function _parse_stored_field_order($order) {
+  $order_arr = explode('_', $order);
+  return array(
+    'field_name' => implode('_', array_slice($order_arr, 0, -2)),
+    'order' => array_slice($order_arr, -2, 1)[0],
+    'by' => array_slice($order_arr, -1, 1)[0],
+  );
+}
+
+function _cmp_number_manual_manual($a, $b) {
+  return true;
+}
+
+function _cmp_number_asc_first($a, $b) {
+  return $a['value'] - $b['value'];
+}
+
+function _cmp_number_desc_first($a, $b) {
+  return $b['value'] - $a['value'];
+}
+
+function _cmp_string_manual_manual($a, $b) {
+  return true;
+}
+
+function _cmp_string_asc_first($a, $b) {
+  return strcmp($a['value'], $b['value']);
+}
+
+function _cmp_string_desc_first($a, $b) {
+  return strcmp($b['value'], $a['value']);
+}
+
+function _cmp_datetime_manual_manual($a, $b) {
+  return true;
+}
+
+function _cmp_datetime_asc_startdate($a, $b) {
+  return strtotime($a['value']) - strtotime($b['value']);
+}
+
+function _cmp_datetime_desc_startdate($a, $b) {
+  return strtotime($b['value']) - strtotime($a['value']);
+}
+
+function _cmp_datetime_asc_enddate($a, $b) {
+  return strtotime($a['value2']) - strtotime($b['value2']);
+}
+
+function _cmp_datetime_desc_enddate($a, $b) {
+  return strtotime($b['value2']) - strtotime($a['value2']);
+}
