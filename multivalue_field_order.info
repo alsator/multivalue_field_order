@@ -1,4 +1,5 @@
 name = Multivalue Field Order
 description = Set an automatic order of items of multivalue field or field collection on entity save.
 core = 7.x
-version = 7.x-0.1
+version = 7.x-1.x
+package = Files
