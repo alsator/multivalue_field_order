@@ -136,12 +136,12 @@ function _field_sort_or_cmp_coll($entity_type, $entity, &$skip_fields) {
 
     $field_settings = field_info_field($field_name);
 
-    $parsed_field_order = _parse_stored_field_order($field_settings['order']);
-    if($parsed_field_order['field_name'] == 'self') {
+    $parsed_field_order = isset($field_settings['order']) ? _parse_stored_field_order($field_settings['order']) : '';
+    if($parsed_field_order && $parsed_field_order['field_name'] == 'self') {
       _field_sort($entity->{$field_name}[$language], $field_settings['type'], $parsed_field_order);
     }
     else {
-      if(count($entity->{$field_name}[$language]) > 1) {
+      if(isset($entity->{$field_name}[$language]) && count($entity->{$field_name}[$language]) > 1) {
         _cmp_field_collection($entity->{$field_name}[$language], $parsed_field_order);
       }
     }
